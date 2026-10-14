@@ -1,0 +1,4 @@
+// 房屋土地信息系统 —— Android 壳工程根配置
+plugins {
+    id 'com.android.application' version '8.4.2' apply false
+}

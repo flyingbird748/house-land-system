@@ -1,0 +1,25 @@
+# ---------------- 运行时数据与密钥（绝不入库） ----------------
+# data/ 下存放业务数据库 db.json 与鉴权盐值 server.key（首次启动自动生成），
+# 以及业务图片 data/images/ 与调试截图 data/shots/
+data/
+
+# ---------------- 构建产物 ----------------
+# dist/：打包输出的 APK（最大 153MB，超过 GitHub 单文件 100MB 限制）
+dist/
+android/app/build/
+android/build/
+android/.gradle/
+# assets/app：打包时解压进去的 app 副本
+android/app/src/main/assets/app/
+*.apk
+*.aab
+
+# ---------------- 免安装 Node 运行时副本（84MB，按需自备） ----------------
+# 缺少时启动脚本回退到系统 node；也可自行把 node.exe 放到 server/ 下
+server/node.exe
+node_modules/
+
+# ---------------- 其他 ----------------
+*.log
+Thumbs.db
+.DS_Store

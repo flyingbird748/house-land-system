@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 启动页 Logo：房产 + 定位针 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <!-- 定位针外形 -->
+    <path
+        android:fillColor="#1A3A6B"
+        android:pathData="M48,8 C31.4,8 18,21.4 18,38 C18,57 48,88 48,88 C48,88 78,57 78,38 C78,21.4 64.6,8 48,8 Z" />
+    <!-- 房子主体 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,30 L48,22 L58,30 L58,52 L38,52 Z" />
+    <!-- 地块线 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M26,62 L70,62 L70,66 L26,66 Z M26,70 L70,70 L70,74 L26,74 Z" />
+</vector>

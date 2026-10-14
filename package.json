@@ -1,0 +1,13 @@
+{
+  "name": "house-land-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "房屋土地信息系统（零第三方依赖，Node 内置模块 + 原生 JS）",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "build": "node tools/build.js",
+    "build:android": "node tools/build-android.js",
+    "build:apk": "node tools/build-apk.js"
+  }
+}
