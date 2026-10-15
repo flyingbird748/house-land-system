@@ -10,6 +10,7 @@
  */
 
 const db = require('./mysql.js');
+const time = require('./time.js');
 const schema = require('./schema.js');
 
 /* ------------------------------ 列清单 ------------------------------ */
@@ -48,8 +49,9 @@ const AGG_FIELDS = {
 
 /* ------------------------------ 通用工具 ------------------------------ */
 
+/** 当前时间的 DATETIME 串（服务器本地时间，见 time.js 的约定） */
 function nowSql() {
-  return new Date().toISOString().slice(0, 19).replace('T', ' ');
+  return time.nowSql();
 }
 
 /** 把可见单位名集合转成 SQL 条件；null 表示不限制 */

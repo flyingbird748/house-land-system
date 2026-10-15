@@ -155,6 +155,7 @@ house-land-system/
 npm install                  # 安装数据库驱动（mysql2）
 npm run db:init              # 建库建表
 npm run db:migrate           # 把旧版 data/db.json 迁到 MySQL
+node tools/fix-datetime.js   # 修正历史 DATETIME 的时区偏移（见下方说明，只需一次）
 node tools/build.js          # 前端源码 -> 单文件 web/index.html
 node tools/build-apk.js      # 一键构建 Android APK（需 JDK17 + Android SDK，见 docs）
 node tools/build-template.js "源表.xlsx"   # 重新生成 Excel 导入模板
@@ -165,6 +166,7 @@ node tools/build-template.js "源表.xlsx"   # 重新生成 Excel 导入模板
 ```bash
 node tools/mysql-smoke.js     # MySQL 版端到端自检：登录、单位、用户、资产、筛选排序分页、
                               # 统计、报告、图片上传、日志、系统设置（51 项）
+node tools/time-check.js      # 操作日志时间正确性验收（7 项）
 NODE_PATH="<playwright-core 所在 node_modules>" node tools/smoke.js   # 旧版测试（见下方说明）
 ```
 
@@ -173,6 +175,29 @@ NODE_PATH="<playwright-core 所在 node_modules>" node tools/smoke.js   # 旧版
 > 注：`tools/` 下的测试脚本沿用自本项目的前身（当时带示例数据），其中部分断言
 > 依赖「55 条示例资产 / 演示账号」等数据。本系统初始为空库，这类断言会失败，
 > 属预期；与业务逻辑无关的检查（登录、权限、模板、报告引擎等）仍可正常使用。
+
+### 时间是怎么存的（改动时间字段前必读）
+
+MySQL 的 `DATETIME` 不带时区，而 JS 的 `toISOString()` 返回的是 **UTC** —— 两者直接用会
+整整差一个时区（东八区下差 8 小时，写一次读一次就是 16 小时）。本项目的统一约定在
+`server/lib/time.js`，改任何时间字段前先看它：
+
+| 位置 | 格式 | 例子 |
+| --- | --- | --- |
+| 数据库 `DATETIME` 列 | **服务器本地时间** `YYYY-MM-DD HH:mm:ss` | `2026-10-15 21:44:26` |
+| 接口返回给前端 | **本地时间 + 时区偏移**的 ISO 串 | `2026-10-15T21:44:26+08:00` |
+| 数据库 `DATE` 列 | 按本地时区取年月日 | `2026-10-15` |
+
+前端既有 `slice(0,19).replace('T',' ')` 直接显示、也有 `new Date(v)` 计算相对时间两种用法，
+带偏移的本地时间两者都正确；**不要**改回 `toISOString()`（UTC），那会让页面显示的时间
+比真实时间慢 8 小时。
+
+历史库（曾经用 UTC 写进去的旧数据）用下面的脚本一次性补回来，脚本幂等、可 `--dry-run` 预演：
+
+```bash
+node tools/fix-datetime.js --dry-run   # 先看会改什么
+node tools/fix-datetime.js             # 执行修正（把旧数据 +本地时区偏移）
+```
 
 ---
 

@@ -1,4 +1,5 @@
 'use strict';
+const time = require('./time.js');
 /**
  * 房屋土地数据字典
  *  - importAliases: 用于 Excel 表头自动匹配（去空格/括号后比较）
@@ -134,7 +135,8 @@ function toDate(v) {
     const ms = Math.round((v - 25569) * 86400 * 1000);
     const d = new Date(ms);
     if (!Number.isNaN(d.getTime()) && d.getUTCFullYear() > 1900 && d.getUTCFullYear() < 2200) {
-      return d.toISOString().slice(0, 10);
+      // 按本地时区取年月日：东八区下 toISOString() 会把当天 00:00 变成前一天 16:00，日期差一天
+      return time.toSqlDate(d);
     }
   }
   return null;

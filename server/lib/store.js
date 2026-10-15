@@ -18,6 +18,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const repo = require('./repo.js');
+const time = require('./time.js');
 
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 const IMAGES_DIR = path.join(DATA_DIR, 'images');
@@ -65,7 +66,7 @@ async function nextId(kind) {
 async function log(user, action, target, detail) {
   await repo.logs.add({
     id: await nextId('log'),
-    ts: new Date().toISOString(),
+    ts: time.nowIso(),
     user: (user && (user.name || user.username)) || '系统',
     username: (user && user.username) || '',
     unit: (user && user.unit) || '', // 记录操作人所属单位，供单位管理员按范围查看

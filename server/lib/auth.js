@@ -109,7 +109,7 @@ async function ensureDefaultUsers() {
       id: await store.nextId('user'), username, name, role,
       unit: unit || '', unitId: unitId || '',
       salt: s, hash: hashPassword(password, s),
-      createdAt: new Date().toISOString(), lastLoginAt: null, disabled: false,
+      createdAt: time.nowIso(), lastLoginAt: null, disabled: false,
     });
   };
   await mk('admin', '系统管理员', 'admin', 'admin123');
@@ -157,7 +157,7 @@ async function ensureUnitAdminDemo() {
     id: await store.nextId('user'), username: 'unitadmin', name: '单位管理员',
     role: 'unitadmin', unit: unit.name, unitId: unit.id,
     salt: s, hash: hashPassword('unitadmin123', s),
-    createdAt: new Date().toISOString(), lastLoginAt: null, disabled: false,
+    createdAt: time.nowIso(), lastLoginAt: null, disabled: false,
   });
   return true;
 }

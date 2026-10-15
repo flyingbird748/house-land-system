@@ -7,12 +7,14 @@
  *
  * 约定：
  *   · 数据库列名用 snake_case，业务代码里用 camelCase，映射在本文件统一完成；
- *   · DATETIME 列统一转成 ISO 字符串返回，与改造前的 JSON 版本行为一致（前端大量按字符串排序）；
+ *   · DATETIME 列存「服务器本地时间」，读出来转成「带时区偏移的本地 ISO 串」返回，
+ *     前端既有 slice 显示也有 new Date() 两种用法，带偏移的本地时间两者都正确（见 time.js）；
  *   · 连接配置优先环境变量，其次 data/dbconfig.json（该文件不入库）。
  */
 
 const fs = require('fs');
 const path = require('path');
+const time = require('./time.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const CONFIG_PATH = process.env.DB_CONFIG || path.join(ROOT, 'data', 'dbconfig.json');
@@ -34,6 +36,9 @@ const DEFAULT_CONFIG = {
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,
   dateStrings: ['DATE'], // DATE 列返回 'YYYY-MM-DD'；DATETIME 交给我们自己转 ISO
+  // 与「DATETIME 存服务器本地时间」的约定配套：驱动按 Node 进程本地时区解析 DATETIME，
+  // 这样写入与读出互为逆运算，不会像 UTC 那样来回丢 8 小时
+  timezone: 'local',
   multipleStatements: false,
 };
 
@@ -169,10 +174,13 @@ function camel(s) {
   return out;
 }
 
+/**
+ * DATETIME 值 -> 返回给前端的字符串。
+ * 必须用「本地时间 + 偏移」而不是 toISOString()（UTC）：前端大量 slice(0,19) 直接显示，
+ * 给 UTC 就会比真实时间慢 8 小时。
+ */
 function toISO(v) {
-  if (!v) return null;
-  if (v instanceof Date) return v.toISOString();
-  return String(v);
+  return time.toLocalIso(v);
 }
 
 /** 数据库行 -> 业务对象（camelCase；DATETIME 转 ISO） */
@@ -208,10 +216,9 @@ function pickColumns(obj, columns) {
       v = (isTyped || NULLABLE_TEXT_COLUMNS.has(col)) ? null : '';
     }
     if (typeof v === 'object' && v !== null && !(v instanceof Date)) v = JSON.stringify(v);
-    if (v instanceof Date) v = v.toISOString().slice(0, 19).replace('T', ' ');
-    else if (typeof v === 'string' && DATETIME_KEYS.has(ck) && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
-      v = v.slice(0, 19).replace('T', ' ');
-    }
+    // 时间列：统一转成「本地时间」再入库（DATETIME 不带时区，存什么就读什么）
+    if (DATETIME_COLUMNS.has(col)) v = time.toSqlDatetime(v);
+    else if (DATE_COLUMNS.has(col)) v = time.toSqlDate(v);
     out[col] = v;
   }
   return out;

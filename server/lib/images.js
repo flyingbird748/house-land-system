@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const store = require('./store.js');
 const repo = require('./repo.js');
+const time = require('./time.js');
 
 const MAX_COUNT = 3;
 const MAX_SIZE = 2 * 1024 * 1024;
@@ -86,7 +87,7 @@ async function add(assetId, input, user) {
   const kind = sniff(buf);
   if (!kind) throw new Error('仅支持 JPG / PNG / GIF / WebP 格式的图片');
 
-  const now = new Date().toISOString();
+  const now = time.nowIso();
   const id = await store.nextId('image');
   const dir = dirOf(assetId);
   ensureDir();

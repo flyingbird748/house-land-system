@@ -17,6 +17,7 @@ const mapcfg = require('./lib/mapconfig.js');
 const reportcfg = require('./lib/reportcfg.js');
 const report = require('./lib/report.js');
 const images = require('./lib/images.js');
+const time = require('./lib/time.js');
 const repo = require('./lib/repo.js');
 const orgcache = require('./lib/orgcache.js');
 const mysqldb = require('./lib/mysql.js');
@@ -204,7 +205,7 @@ async function requirePerm(req, res, perm) {
 /* ---- 健康检查 ---- */
 route('GET', /^\/api\/health$/, async (req, res) => {
   const [assets, users] = await Promise.all([repo.assets.count(), repo.users.count()]);
-  ok(res, { ok: true, time: new Date().toISOString(), assets, users });
+  ok(res, { ok: true, time: time.nowIso(), assets, users });
 });
 
 /* ---- 登录 / 登出 / 当前用户 ---- */
@@ -313,7 +314,7 @@ route('POST', /^\/api\/users$/, async (req, res) => {
     id: await store.nextId('user'), username, name: String(b.name || username), role: b.role,
     unit: target ? target.name : '', unitId: target ? target.id : '',
     salt: s, hash: auth.hashPassword(String(b.password || '123456'), s),
-    createdAt: new Date().toISOString(), lastLoginAt: null, disabled: false,
+    createdAt: time.nowIso(), lastLoginAt: null, disabled: false,
   };
   await repo.users.create(u);
   await store.log(me, '新增用户', username, `角色 ${auth.ROLES[b.role].label}${u.unit ? ' · ' + u.unit : ''}`);
@@ -490,7 +491,7 @@ route('POST', /^\/api\/assets$/, async (req, res) => {
   if (!name) return fail(res, 400, '资产名称不能为空');
   const assetNo = String(b.assetNo || '').trim();
   if (assetNo && await repo.assets.existsAssetNo(assetNo)) return fail(res, 400, `资产编号 ${assetNo} 已存在`);
-  const now = new Date().toISOString();
+  const now = time.nowIso();
   const a = { id: await store.nextId('asset'), createdAt: now, updatedAt: now, createdBy: me.name, updatedBy: me.name };
   sanitizeAsset(b, a);
   const myUnit = org.unitOfUser(me);
@@ -525,7 +526,7 @@ route('PUT', /^\/api\/assets\/([^/]+)$/, async (req, res, m) => {
   const before = {};
   for (const f of schema.FIELDS) before[f.key] = a[f.key];
   sanitizeAsset(b, a);
-  a.updatedAt = new Date().toISOString();
+  a.updatedAt = time.nowIso();
   a.updatedBy = me.name;
   const changed = schema.FIELDS.filter((f) => JSON.stringify(before[f.key]) !== JSON.stringify(a[f.key])).map((f) => f.label);
   await repo.assets.update(m[1], a);
@@ -671,10 +672,10 @@ route('PUT', /^\/api\/assets\/([^/]+)\/geo$/, async (req, res, m) => {
     a.lat = Math.round(lat * 1e6) / 1e6;
     a.polygon = Array.isArray(b.polygon) ? b.polygon.filter((p) => Number.isFinite(p.lng) && Number.isFinite(p.lat)).slice(0, 200) : null;
     if (b.address) a.geoAddress = String(b.address).slice(0, 200);
-    a.geoAt = new Date().toISOString();
+    a.geoAt = time.nowIso();
     a.geoBy = me.name;
   }
-  a.updatedAt = new Date().toISOString();
+  a.updatedAt = time.nowIso();
   a.updatedBy = me.name;
   await repo.assets.update(m[1], a);
   await store.log(me, a.lng ? '地图标注' : '清除标注', a.name || a.id, a.lng ? `${a.lng},${a.lat}` : '');
@@ -687,7 +688,7 @@ route('POST', /^\/api\/assets\/geo\/batch$/, async (req, res) => {
   let b; try { b = JSON.parse((await readBody(req, 4 << 20)).toString('utf8')); } catch (e) { return fail(res, 400, '请求格式错误'); }
   const items = Array.isArray(b.items) ? b.items : [];
   let done = 0;
-  const now = new Date().toISOString();
+  const now = time.nowIso();
   for (const it of items) {
     const a = await findById(String(it.id));
     if (!a) continue;
@@ -1001,7 +1002,7 @@ route('POST', /^\/api\/import\/commit$/, async (req, res) => {
 
   const mode = ['upsert', 'insert', 'replace'].includes(b.mode) ? b.mode : 'upsert';
   const defaultUnit = String(b.unit || '').trim();
-  const now = new Date().toISOString();
+  const now = time.nowIso();
 
   // 导入目标单位必须在本人的可写范围内（系统管理员不限）
   if (defaultUnit && !org.canWriteUnit(me, defaultUnit)) {
@@ -1091,7 +1092,7 @@ route('GET', /^\/api\/export$/, async (req, res) => {
   const header = exportFields.map((f) => f.label);
   const data = [header, ...rows.map((a) => exportFields.map((f) => (a[f.key] == null ? '' : a[f.key])))];
 
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = time.todayDate();
   if (format === 'csv') {
     const buf = buildCsv(data);
     res.writeHead(200, {
