@@ -7,6 +7,7 @@
  * 由系统管理员维护；留空时报告引擎按各自的兜底规则自动推算（见 lib/report.js）。
  */
 const store = require('./store.js');
+const repo = require('./repo.js');
 
 /** 参数定义：key / 名称 / 单位 / 说明 / 兜底规则文字（设置页与规则说明共用） */
 const PARAMS = [
@@ -57,12 +58,8 @@ const DEFAULT_REPORT = () => ({
   asOf: '',
 });
 
-function db() { return store.load(); }
-
-function get() {
-  const d = db();
-  if (!d.settings) d.settings = {};
-  const cur = d.settings.report || {};
+async function get() {
+  const cur = (await repo.settings.get('report')) || {};
   const out = DEFAULT_REPORT();
   PARAMS.forEach((p) => {
     const v = cur[p.key];
@@ -74,10 +71,8 @@ function get() {
   return out;
 }
 
-function set(patch) {
-  const d = db();
-  if (!d.settings) d.settings = {};
-  const cur = get();
+async function set(patch) {
+  const cur = await get();
   const next = Object.assign({}, cur);
   (patch || {});
   PARAMS.forEach((p) => {
@@ -91,14 +86,13 @@ function set(patch) {
     const n = Number(raw);
     next[p.key] = Number.isFinite(n) && n >= 0 ? Math.round(n) : '';
   });
-  d.settings.report = next;
-  store.saveNow();
+  await repo.settings.set('report', next);
   return next;
 }
 
 /** 设置页用：参数定义 + 当前值 */
-function view() {
-  return { params: PARAMS, values: get() };
+async function view() {
+  return { params: PARAMS, values: await get() };
 }
 
 module.exports = { PARAMS, PARAM_MAP, get, set, view };

@@ -2,12 +2,17 @@
   "name": "house-land-system",
   "version": "1.0.0",
   "private": true,
-  "description": "房屋土地信息系统（零第三方依赖，Node 内置模块 + 原生 JS）",
+  "description": "房屋土地信息系统：Node 内置 HTTP + 原生 JS 前端 + MySQL 数据存储",
   "main": "server/server.js",
   "scripts": {
     "start": "node server/server.js",
     "build": "node tools/build.js",
+    "db:init": "node tools/init-db.js",
+    "db:migrate": "node tools/migrate-to-mysql.js",
     "build:android": "node tools/build-android.js",
     "build:apk": "node tools/build-apk.js"
+  },
+  "dependencies": {
+    "mysql2": "^3.24.6"
   }
 }

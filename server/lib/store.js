@@ -1,113 +1,70 @@
 'use strict';
 /**
- * 数据存储层：单文件 JSON + 原子写入（先写临时文件再 rename），零第三方依赖。
- * 数据量级（数百至数万条资产）下性能充足，且无需安装任何数据库。
+ * 存储层（MySQL 版）
+ *
+ * 改造前这里是「单文件 JSON + 防抖落盘」；改造后数据存在 MySQL，
+ * 本模块只保留几件与存储相关、且需要跨模块复用的小事：
+ *   · 服务端签名盐值（secret）：存 settings 表，进程启动时载入内存缓存
+ *   · 业务主键生成（nextId）：走 seq 表的原子自增
+ *   · 操作日志（log / listLogs）
+ *   · 图片二进制目录（图片文件仍落盘，库里只存元信息）
+ *
+ * 注意：数据的增删改查一律走 lib/repo.js —— 全量 SQL 化之后，
+ * 内存里不再保存全量数据，也就没有「整个库的对象」可拿了。
  */
+
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+const repo = require('./repo.js');
+
 const DATA_DIR = path.join(__dirname, '..', '..', 'data');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
-const SECRET_FILE = path.join(DATA_DIR, 'server.key');
+const IMAGES_DIR = path.join(DATA_DIR, 'images');
 
-function ensureDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+function ensureDir(dir) {
+  const d = dir || DATA_DIR;
+  if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 }
 
-const EMPTY = () => ({
-  meta: { version: 1, createdAt: new Date().toISOString() },
-  units: [],
-  users: [],
-  assets: [],
-  logs: [],
-  settings: {}, // 系统设置（地图服务商与密钥等），见 lib/mapconfig.js
-  images: [],   // 房产图片元信息（二进制在 data/images/ 下），见 lib/images.js
-  seq: { asset: 0, user: 0, log: 0, unit: 0 },
-});
-
-let db = null;
-let saveTimer = null;
-let dirty = false;
-
-function load() {
-  ensureDir();
-  if (db) return db;
-  if (fs.existsSync(DB_FILE)) {
-    try {
-      db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-      const base = EMPTY();
-      for (const k of Object.keys(base)) if (db[k] === undefined) db[k] = base[k];
-    } catch (e) {
-      const bak = DB_FILE + '.corrupt-' + Date.now();
-      fs.copyFileSync(DB_FILE, bak);
-      console.error('[store] 数据文件损坏，已备份至', bak, '并重建空库:', e.message);
-      db = EMPTY();
-    }
-  } else {
-    db = EMPTY();
-    flush();
-  }
-  return db;
-}
-
-function flush() {
-  ensureDir();
-  const tmp = DB_FILE + '.' + process.pid + '.tmp';
-  const json = JSON.stringify(db, null, 1);
-  fs.writeFileSync(tmp, json, 'utf8');
-  fs.renameSync(tmp, DB_FILE);
-  dirty = false;
-}
-
-/** 合并写入：高频操作下避免每个请求都落盘 */
-function save() {
-  dirty = true;
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    if (dirty) {
-      try { flush(); } catch (e) { console.error('[store] 写入失败', e); }
-    }
-  }, 120);
-}
-
-function saveNow() {
-  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-  flush();
-}
-
-function nextId(kind) {
-  const d = load();
-  d.seq[kind] = (d.seq[kind] || 0) + 1;
-  return `${kind}_${Date.now().toString(36)}_${d.seq[kind].toString(36)}`;
-}
-
-/* ------------------------------ 服务端密钥 ------------------------------ */
+/* ------------------------------ 服务端签名盐值 ------------------------------ */
 
 let cachedSecret = null;
-function secret() {
+
+/** 启动时调用一次，之后 HMAC 签名直接用缓存，避免每次鉴权都查库 */
+async function initSecret() {
   if (cachedSecret) return cachedSecret;
-  ensureDir();
-  if (fs.existsSync(SECRET_FILE)) {
-    cachedSecret = fs.readFileSync(SECRET_FILE, 'utf8').trim();
-  } else {
-    cachedSecret = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(SECRET_FILE, cachedSecret, 'utf8');
+  let s = await repo.settings.get('secret');
+  if (!s || typeof s !== 'string' || s.length < 16) {
+    s = crypto.randomBytes(32).toString('hex');
+    await repo.settings.set('secret', s);
   }
+  cachedSecret = s;
+  return s;
+}
+
+/** 同步取盐值（供高频签名使用；正常应由 initSecret() 先填好缓存） */
+function secret() {
   if (!cachedSecret) {
+    // 理论上不会发生：服务启动时会先 initSecret()。
+    // 兜底生成临时值，保证不崩，代价是需要重新登录。
     cachedSecret = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(SECRET_FILE, cachedSecret, 'utf8');
   }
   return cachedSecret;
 }
 
+/* ------------------------------ 业务主键 ------------------------------ */
+
+async function nextId(kind) {
+  const n = await repo.seq.next(kind);
+  return `${kind}_${Date.now().toString(36)}_${n.toString(36)}`;
+}
+
 /* ------------------------------ 操作日志 ------------------------------ */
 
-function log(user, action, target, detail) {
-  const d = load();
-  d.logs.push({
-    id: nextId('log'),
+async function log(user, action, target, detail) {
+  await repo.logs.add({
+    id: await nextId('log'),
     ts: new Date().toISOString(),
     user: (user && (user.name || user.username)) || '系统',
     username: (user && user.username) || '',
@@ -116,12 +73,34 @@ function log(user, action, target, detail) {
     target: target || '',
     detail: detail || '',
   });
-  if (d.logs.length > 5000) d.logs.splice(0, d.logs.length - 5000);
+  // 只保留最近 5000 条（与旧版一致）；裁剪失败不影响主流程
+  try { await repo.logs.trim(5000); } catch (e) { /* ignore */ }
 }
 
-function listLogs(limit = 200) {
-  const d = load();
-  return d.logs.slice(-limit).reverse();
+/**
+ * @param {number} limit
+ * @param {Set<string>|null} unitNames 非系统管理员只看本单位记录
+ */
+async function listLogs(limit = 200, unitNames = null) {
+  return repo.logs.list(limit, unitNames ? [...unitNames] : null);
 }
 
-module.exports = { load, save, saveNow, nextId, secret, log, listLogs, DATA_DIR, DB_FILE };
+/* ------------------------------ 图片目录 ------------------------------ */
+
+function imageDir(assetId) {
+  const dir = path.join(IMAGES_DIR, String(assetId));
+  ensureDir(dir);
+  return dir;
+}
+
+module.exports = {
+  DATA_DIR,
+  IMAGES_DIR,
+  imageDir,
+  ensureDir,
+  initSecret,
+  secret,
+  nextId,
+  log,
+  listLogs,
+};

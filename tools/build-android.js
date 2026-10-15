@@ -58,20 +58,33 @@ function main() {
 
   console.log('== 3/4 拷贝资产 ==');
   copyDir(path.join(ROOT, 'server'), path.join(ANDROID_ASSETS, 'server'), 'server/');
+
+  // mysql2 驱动：APK 里的服务要连数据库，必须带上（纯 JS 依赖，可在手机上跑）
+  const nmDir = path.join(ROOT, 'node_modules');
+  if (fs.existsSync(nmDir)) {
+    copyDir(nmDir, path.join(ANDROID_ASSETS, 'node_modules'), 'node_modules/');
+  } else {
+    console.error('  ! 缺少 node_modules，请先执行 npm install，否则 APK 内服务连不上数据库');
+  }
+
   // web 只带单文件产物 index.html（shell.html/src 是开发源，不进 APK）
   const webDest = path.join(ANDROID_ASSETS, 'web');
   fs.mkdirSync(webDest, { recursive: true });
   fs.copyFileSync(idx, path.join(webDest, 'index.html'));
   console.log(`  web/: index.html, ${(fs.statSync(idx).size / 1024).toFixed(0)} KB`);
-  // data 只带种子数据与签名密钥（server.key 与 db.json 里的令牌配套，必须同源）；
-  // images/ 由用户上传后自动创建，shots/server.log 不进包
+
+  // data：数据库版只带连接配置。业务数据在 MySQL 服务器上，
+  // 手机端通过内网访问它，因此不再需要种子 db.json 与签名密钥文件
+  // （签名盐值也存在数据库的 settings 表里）。
   const dataDest = path.join(ANDROID_ASSETS, 'data');
   fs.mkdirSync(dataDest, { recursive: true });
-  fs.copyFileSync(path.join(ROOT, 'data', 'db.json'), path.join(dataDest, 'db.json'));
-  const keyFile = path.join(ROOT, 'data', 'server.key');
-  if (fs.existsSync(keyFile)) fs.copyFileSync(keyFile, path.join(dataDest, 'server.key'));
-  const seedBytes = fs.statSync(path.join(dataDest, 'db.json')).size;
-  console.log(`  data/: db.json + server.key, ${(seedBytes / 1024).toFixed(0)} KB`);
+  const cfgFile = path.join(ROOT, 'data', 'dbconfig.json');
+  if (fs.existsSync(cfgFile)) {
+    fs.copyFileSync(cfgFile, path.join(dataDest, 'dbconfig.json'));
+    console.log('  data/: dbconfig.json（数据库连接配置）');
+  } else {
+    console.log('  ! 未找到 data/dbconfig.json，APK 首次启动将生成默认配置模板，需连电脑改配置');
+  }
 
   console.log('== 4/4 写入版本标记与拷贝清单 ==');
   let ver = 'dev';

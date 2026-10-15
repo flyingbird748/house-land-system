@@ -12,27 +12,28 @@
  *
  * 单位层级用 units.parent（父单位 id，顶级为 ''），资产 / 用户用「单位名称」关联。
  */
-const store = require('./store.js');
+const orgcache = require('./orgcache.js');
 
 const MAX_DEPTH = 32;
 
-function db() { return store.load(); }
+/** 单位数据来自内存缓存（单位表很小，但权限判断每次请求都要用），资产/用户一律走 SQL */
+function db() { return { units: orgcache.all() }; }
 
 function isSysAdmin(user) { return !!user && user.role === 'admin'; }
 
 function unitById(id) {
   if (!id) return null;
-  return db().units.find((u) => u.id === id) || null;
+  return orgcache.all().find((u) => u.id === id) || null;
 }
 
 function unitByName(name) {
   if (!name) return null;
-  return db().units.find((u) => u.name === name) || null;
+  return orgcache.all().find((u) => u.name === name) || null;
 }
 
 function childrenOf(id) {
   const pid = id || '';
-  return db().units.filter((u) => (u.parent || '') === pid);
+  return orgcache.all().filter((u) => (u.parent || '') === pid);
 }
 
 /** 全部后代单位（不含自身），带环路保护 */
@@ -125,12 +126,13 @@ function canWriteUnit(user, unitName) {
   return names.has(String(unitName || ''));
 }
 
-/** 可见资产列表（系统管理员全部；其余为本单位 + 下级） */
-function visibleAssets(user) {
-  if (!user) return [];
-  const names = visibleUnitNames(user);
-  if (!names) return db().assets;
-  return db().assets.filter((a) => names.has(unitKey(a)));
+/**
+ * 传给数据层的「可见单位范围」：
+ *   null = 不限制（系统管理员）；Set = 只允许这些单位名；空 Set = 看不到任何数据。
+ * 资产相关的筛选/统计/导出一律用这个范围拼 SQL 条件，不再把数据读进内存过滤。
+ */
+function unitScope(user) {
+  return visibleUnitNames(user);
 }
 
 /** 单位全路径，如「市局 / 第一分局」 */
@@ -212,7 +214,7 @@ module.exports = {
   MAX_DEPTH, isSysAdmin,
   unitById, unitByName, childrenOf, descendantUnits, subtreeNames,
   namesOfName, descendantNamesOfName, unitOfUser,
-  visibleUnitNames, writableUnitNames,
-  canRead, canWrite, canReadUnit, canWriteUnit, visibleAssets,
+  visibleUnitNames, writableUnitNames, unitScope,
+  canRead, canWrite, canReadUnit, canWriteUnit,
   pathOf, levelOf, isDescendant, treeRows, manageableUser,
 };

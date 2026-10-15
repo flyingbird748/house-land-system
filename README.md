@@ -11,17 +11,37 @@
 
 ## 一、快速开始
 
-### 电脑上使用
+### 环境要求
 
-双击 **`启动系统.bat`**（需已安装 Node.js 18+），浏览器会自动打开
-<http://127.0.0.1:8789>。
+| 依赖 | 版本 | 说明 |
+| --- | --- | --- |
+| Node.js | 18 及以上 | 仅用内置模块，无需编译 |
+| MySQL | 8.0 及以上 | 数据存储；也可连到局域网内的数据库服务器 |
+| npm 包 | mysql2 | **唯一的第三方依赖**，执行 `npm install` 安装 |
 
-或手动启动：
+### 电脑上使用（首次）
 
 ```bash
+npm install          # 安装数据库驱动（只需一次）
+npm run db:init      # 建库建表（只需一次；会读 data/dbconfig.json 里的连接信息）
 node server/server.js
-# 然后浏览器访问 http://127.0.0.1:8789
+# 浏览器打开 http://127.0.0.1:8789
 ```
+
+数据库连接信息在 **`data/dbconfig.json`**（首次启动自动生成模板）：
+
+```json
+{ "host": "127.0.0.1", "port": 3306, "user": "root", "password": "", "database": "house_land" }
+```
+
+也可以用环境变量覆盖：`DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME`。
+
+### 日常使用
+
+双击 **`启动系统.bat`** 即可，浏览器会自动打开 <http://127.0.0.1:8789>。
+脚本会检查依赖与前端产物，缺什么补什么。
+
+> 服务启动时会先连数据库，连不上会直接给出排查提示（不会带着一堆驱动报错退出）。
 
 ### 手机上使用
 
@@ -35,6 +55,12 @@ node server/server.js
 
 > APK 的应用标识为 `com.house.land`，与旧版「房产土地信息管理系统」的 APK 可以同时安装、
 > 互不覆盖（两者端口也不同：本系统 8789，旧版 8787）。
+
+> **手机端怎么连数据库**：APK 内部同样跑着一个 Node 服务，它连的是
+> `data/dbconfig.json` 里配置的 MySQL —— 手机上不会也不适合跑数据库服务。
+> 因此手机需要和数据库服务器在同一个内网（单位 WiFi / VPN）里，
+> 并把配置里的 `host` 填成数据库服务器的内网 IP（不能用 `127.0.0.1`，那是指手机自己）。
+> 打包前改好 `data/dbconfig.json` 再执行 `npm run build:android`，配置会一起打进 APK。
 
 ### 初始账号
 
@@ -72,13 +98,30 @@ node server/server.js
 
 ## 三、数据存放位置
 
-| 环境 | 数据文件 |
+| 内容 | 存放位置 |
 | --- | --- |
-| 电脑 | `data/db.json`（单一 JSON 文件），上传的图片在 `data/images/<资产ID>/` |
-| 手机 | 应用私有目录 `/data/data/com.house.land/files/app/data/db.json` |
+| 单位 / 用户 / 资产 / 日志 / 图片元信息 / 系统设置 | MySQL 数据库（`data/dbconfig.json` 里指定的库，默认 `house_land`） |
+| 上传的图片文件 | 磁盘目录 `data/images/<资产ID>/`（库里只存元信息） |
+| 数据库连接配置 | `data/dbconfig.json`（不入库，含密码，注意保管） |
 
-**备份**：直接复制 `db.json` 与 `images/` 目录即可；恢复时覆盖回原位置。
-换电脑/换手机时同理。
+**备份**：用 `mysqldump` 导出数据库，同时复制 `data/images/` 目录：
+
+```bash
+mysqldump -uroot -p house_land > backup-$(date +%F).sql
+```
+
+恢复：`mysql -uroot -p house_land < backup-2026-10-15.sql`，图片目录覆盖回原位置即可。
+
+### 从旧版（JSON 存储）升级
+
+旧版本的数据在 `data/db.json` 里，改版后用下面的命令迁到 MySQL：
+
+```bash
+npm run db:init                 # 先建库建表
+npm run db:migrate              # 再导入 data/db.json
+```
+
+迁移是**幂等**的，可以反复执行补齐；确认无误后把 `db.json` 改名备份即可。
 
 ---
 
@@ -92,8 +135,11 @@ house-land-system/
     assets/          报告模板、Excel 导入模板
   web/               前端源码（src/）与构建产物（index.html 单文件）
   tools/             构建与测试脚本
+    sql/schema.sql     数据库表结构（建库建表用）
+    init-db.js         建库建表（npm run db:init）
+    migrate-to-mysql.js  旧版 db.json 迁移到 MySQL（npm run db:migrate）
   android/           Android 壳工程（打包 APK 用）
-  data/             数据目录（db.json、图片、签名密钥）——首次启动自动生成，**不入库**
+  data/             数据库连接配置 dbconfig.json、图片目录 images/ ——**不入库**
   docs/             文档（Android 打包说明、报告占位符替代规则）
   dist/android/      已构建好的 APK（**不入库**，见 Release 附件）
 ```
@@ -106,6 +152,9 @@ house-land-system/
 ## 五、开发者：构建与测试
 
 ```bash
+npm install                  # 安装数据库驱动（mysql2）
+npm run db:init              # 建库建表
+npm run db:migrate           # 把旧版 data/db.json 迁到 MySQL
 node tools/build.js          # 前端源码 -> 单文件 web/index.html
 node tools/build-apk.js      # 一键构建 Android APK（需 JDK17 + Android SDK，见 docs）
 node tools/build-template.js "源表.xlsx"   # 重新生成 Excel 导入模板
@@ -114,7 +163,9 @@ node tools/build-template.js "源表.xlsx"   # 重新生成 Excel 导入模板
 接口测试（先启动服务）：
 
 ```bash
-NODE_PATH="<playwright-core 所在 node_modules>" node tools/smoke.js
+node tools/mysql-smoke.js     # MySQL 版端到端自检：登录、单位、用户、资产、筛选排序分页、
+                              # 统计、报告、图片上传、日志、系统设置（51 项）
+NODE_PATH="<playwright-core 所在 node_modules>" node tools/smoke.js   # 旧版测试（见下方说明）
 ```
 
 环境变量可覆盖地址：`BASE` / `APIBASE` / `PREVIEW`（默认 `http://127.0.0.1:8789`）。
@@ -127,8 +178,11 @@ NODE_PATH="<playwright-core 所在 node_modules>" node tools/smoke.js
 
 ## 六、技术说明
 
-- **零第三方依赖**：后端仅用 Node 内置 `http/fs/crypto` 等模块，前端为原生 JS 单文件，
-  无需 `npm install`，无数据库（单文件 JSON 原子写入）。
+- **依赖极简**：后端仅用 Node 内置 `http/fs/crypto` 等模块，前端为原生 JS 单文件；
+  唯一的第三方依赖是数据库驱动 `mysql2`（`npm install` 一次即可）。
+- **存储**：MySQL 8，数据访问集中在 `server/lib/repo.js`，列名 snake_case、业务对象 camelCase
+  的映射在 `server/lib/mysql.js` 统一完成；资产列表的筛选、排序、分页与统计全部由 SQL 完成，
+  不再把数据读进内存过滤（单位表很小，允许内存缓存）。
 - **权限模型**：系统管理员不限；其余角色只能看到「本单位 + 全部下级」，且只有本单位可写。
 - **地图**：服务商可切换（腾讯 / 天地图），坐标系统一存 GCJ-02，天地图底图自动换算。
 - **报告**：模板占位符替代规则见 `docs/报告占位符替代规则.md`。

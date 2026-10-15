@@ -1,14 +1,15 @@
 'use strict';
 /**
- * 房产图片管理
+ * 房产图片管理（MySQL 版）
  *   · 每条资产最多 3 张（正面 / 侧面 / 室内 …）
  *   · 单张不超过 2MB，仅允许 jpg / png / gif / webp
- *   · 二进制落盘在 data/images/<assetId>/ 下，db.json 只存元信息
- *     （零第三方依赖，服务端不做图片解码，避免依赖与内存开销）
+ *   · 元信息存 images 表；二进制文件仍落盘在 data/images/<assetId>/ 下
+ *     （服务端不做图片解码，避免依赖与内存开销）
  */
 const fs = require('fs');
 const path = require('path');
 const store = require('./store.js');
+const repo = require('./repo.js');
 
 const MAX_COUNT = 3;
 const MAX_SIZE = 2 * 1024 * 1024;
@@ -23,21 +24,13 @@ const ID_RE = /^[A-Za-z0-9_]+$/;
 
 function ensureDir() { if (!fs.existsSync(IMG_DIR)) fs.mkdirSync(IMG_DIR, { recursive: true }); }
 
-function list() {
-  const db = store.load();
-  if (!Array.isArray(db.images)) db.images = [];
-  return db.images;
-}
-
 /** 某条资产的图片（按上传时间排序） */
-function ofAsset(assetId) {
-  return list()
-    .filter((x) => x.assetId === assetId)
-    .sort((a, b) => String(a.uploadedAt).localeCompare(String(b.uploadedAt)));
+async function ofAsset(assetId) {
+  return repo.images.ofAsset(assetId);
 }
 
-function findOne(assetId, imageId) {
-  return list().find((x) => x.assetId === assetId && x.id === imageId) || null;
+async function findOne(assetId, imageId) {
+  return repo.images.byId(assetId, imageId);
 }
 
 /** 供接口返回的图片信息（不含磁盘路径） */
@@ -79,8 +72,8 @@ function fileOf(assetId, img) {
  * @param {{name:string,label:string,data:string,w:number,h:number}} input data 为 base64（可带 dataURL 前缀）
  * @param {object} user
  */
-function add(assetId, input, user) {
-  const exist = ofAsset(assetId);
+async function add(assetId, input, user) {
+  const exist = await repo.images.ofAsset(assetId);
   if (exist.length >= MAX_COUNT) throw new Error(`每条资产最多 ${MAX_COUNT} 张图片，请先删除后再上传`);
 
   const raw = String((input && input.data) || '');
@@ -94,7 +87,7 @@ function add(assetId, input, user) {
   if (!kind) throw new Error('仅支持 JPG / PNG / GIF / WebP 格式的图片');
 
   const now = new Date().toISOString();
-  const id = store.nextId('image');
+  const id = await store.nextId('image');
   const dir = dirOf(assetId);
   ensureDir();
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -114,38 +107,34 @@ function add(assetId, input, user) {
   };
 
   fs.writeFileSync(path.join(dir, rec.file), buf);
-  list().push(rec);
-  store.save();
+  await repo.images.add(rec);
   return view(rec);
 }
 
-function setLabel(assetId, imageId, label) {
-  const rec = findOne(assetId, imageId);
+async function setLabel(assetId, imageId, label) {
+  const rec = await repo.images.byId(assetId, imageId);
   if (!rec) return null;
-  rec.label = LABELS.indexOf(label) >= 0 ? label : '其他';
-  store.save();
-  return view(rec);
+  const next = LABELS.indexOf(label) >= 0 ? label : '其他';
+  await repo.images.setLabel(assetId, imageId, next);
+  return view(Object.assign({}, rec, { label: next }));
 }
 
-function remove(assetId, imageId) {
-  const all = list();
-  const idx = all.findIndex((x) => x.assetId === assetId && x.id === imageId);
-  if (idx < 0) return false;
-  const [rec] = all.splice(idx, 1);
+async function remove(assetId, imageId) {
+  const rec = await repo.images.byId(assetId, imageId);
+  if (!rec) return false;
   try { fs.unlinkSync(fileOf(assetId, rec)); } catch (e) { /* 文件已缺失时忽略 */ }
-  store.save();
+  await repo.images.remove(assetId, imageId);
   return true;
 }
 
-/** 删除资产时连带清理其图片目录 */
-function removeAsset(assetId) {
-  const all = list();
-  for (let i = all.length - 1; i >= 0; i--) if (all[i].assetId === assetId) all.splice(i, 1);
+/** 删除资产时连带清理其图片记录与目录 */
+async function removeAsset(assetId) {
+  await repo.images.removeByAsset(assetId);
   try { fs.rmSync(dirOf(assetId), { recursive: true, force: true }); } catch (e) { /* 忽略 */ }
 }
 
-function readFile(assetId, imageId) {
-  const rec = findOne(assetId, imageId);
+async function readFile(assetId, imageId) {
+  const rec = await repo.images.byId(assetId, imageId);
   if (!rec) return null;
   const file = fileOf(assetId, rec);
   if (!fs.existsSync(file)) return null;
@@ -153,17 +142,14 @@ function readFile(assetId, imageId) {
 }
 
 /** 一次取多条资产的图片（供地图/预览页批量渲染缩略图） */
-function groupBy(assetIds) {
-  const set = new Set(assetIds);
-  const map = {};
-  list().filter((x) => set.has(x.assetId)).forEach((x) => {
-    (map[x.assetId] = map[x.assetId] || []).push(view(x));
-  });
-  Object.keys(map).forEach((k) => map[k].sort((a, b) => String(a.uploadedAt).localeCompare(String(b.uploadedAt))));
-  return map;
+async function groupBy(assetIds) {
+  const map = await repo.images.groupByAssetIds(assetIds || []);
+  const out = {};
+  Object.keys(map).forEach((k) => { out[k] = map[k].map(view); });
+  return out;
 }
 
 module.exports = {
   MAX_COUNT, MAX_SIZE, LABELS, IMG_DIR,
-  list, ofAsset, findOne, view, add, setLabel, remove, removeAsset, readFile, groupBy, sniff,
+  ofAsset, findOne, view, add, setLabel, remove, removeAsset, readFile, groupBy, sniff,
 };

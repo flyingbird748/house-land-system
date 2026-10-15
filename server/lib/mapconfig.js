@@ -9,6 +9,7 @@
  * 本系统只要求「登录后可读取、仅系统管理员可修改」，避免被未授权人员篡改。
  */
 const store = require('./store.js');
+const repo = require('./repo.js');
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
@@ -77,14 +78,10 @@ const PROVIDERS = [
 
 const PROVIDER_KEYS = PROVIDERS.map((p) => p.key);
 
-function db() { return store.load(); }
-
-/** 读取并补齐默认字段（历史库可能没有 settings） */
-function get() {
-  const d = db();
-  if (!d.settings) d.settings = {};
+/** 读取并补齐默认字段（配置存在 settings 表的 map 键里） */
+async function get() {
   const base = DEFAULT_MAP();
-  const cur = d.settings.map || {};
+  const cur = (await repo.settings.get('map')) || {};
   const out = {
     provider: PROVIDER_KEYS.indexOf(cur.provider) >= 0 ? cur.provider : base.provider,
     keys: Object.assign({}, base.keys, cur.keys || {}),
@@ -94,10 +91,8 @@ function get() {
 }
 
 /** 覆盖写入（仅系统管理员） */
-function set(patch) {
-  const d = db();
-  if (!d.settings) d.settings = {};
-  const cur = get();
+async function set(patch) {
+  const cur = await get();
   const next = {
     provider: PROVIDER_KEYS.indexOf(patch.provider) >= 0 ? patch.provider : cur.provider,
     keys: Object.assign({}, cur.keys, patch.keys || {}),
@@ -111,14 +106,13 @@ function set(patch) {
     lng: Number.isFinite(cg) ? Math.max(-180, Math.min(180, cg)) : DEFAULT_CENTER.lng,
     zoom: Number.isFinite(cz) ? Math.max(1, Math.min(20, Math.round(cz))) : DEFAULT_CENTER.zoom,
   };
-  d.settings.map = next;
-  store.saveNow();
+  await repo.settings.set('map', next);
   return next;
 }
 
 /** 设置页用：完整配置 + 服务商清单（含注册指引） */
-function adminView() {
-  const c = get();
+async function adminView() {
+  const c = await get();
   return {
     map: c,
     providers: PROVIDERS,
@@ -127,8 +121,8 @@ function adminView() {
 }
 
 /** 前端地图加载用：当前服务商 + 该服务商的 Key + 默认视野 */
-function publicConfig() {
-  const c = get();
+async function publicConfig() {
+  const c = await get();
   const p = PROVIDERS.find((x) => x.key === c.provider) || PROVIDERS[0];
   const key = (c.keys[c.provider] || '').trim();
   return {
@@ -205,7 +199,7 @@ async function testKey(provider, key) {
 
 /** 地理编码（地址 → 坐标）；返回 { lng, lat } 或 null */
 async function geocode(address) {
-  const c = get();
+  const c = await get();
   const key = (c.keys[c.provider] || '').trim();
   const addr = String(address || '').trim();
   if (!addr || !key) return null;
@@ -241,7 +235,7 @@ async function geocode(address) {
  * （腾讯 WebService = GCJ-02，天地图 = CGCS2000），由前端适配层统一换算成 GCJ-02 后再用。
  */
 async function search(keyword, limit) {
-  const c = get();
+  const c = await get();
   const key = (c.keys[c.provider] || '').trim();
   const kw = String(keyword || '').trim();
   const n = Math.max(1, Math.min(20, Number(limit) || 10));
@@ -300,7 +294,7 @@ async function search(keyword, limit) {
 
 /** 逆地理编码（坐标 → 地址）；返回字符串或 '' */
 async function reverse(lng, lat) {
-  const c = get();
+  const c = await get();
   const key = (c.keys[c.provider] || '').trim();
   if (!key || !Number.isFinite(lng) || !Number.isFinite(lat)) return '';
   try {

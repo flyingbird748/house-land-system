@@ -5,6 +5,7 @@
 const crypto = require('crypto');
 const { URL } = require('url');
 const store = require('./store.js');
+const repo = require('./repo.js');
 
 const TOKEN_TTL = 12 * 60 * 60 * 1000; // 12 小时
 
@@ -44,7 +45,7 @@ function createToken(user) {
   return `v1.${b64url(payload)}.${sign(payload)}`;
 }
 
-function verifyToken(token) {
+async function verifyToken(token) {
   if (typeof token !== 'string') return null;
   const parts = token.split('.');
   if (parts.length !== 3 || parts[0] !== 'v1') return null;
@@ -59,8 +60,7 @@ function verifyToken(token) {
   let payload;
   try { payload = JSON.parse(payloadStr); } catch (e) { return null; }
   if (!payload || payload.exp < Date.now()) return null;
-  const db = store.load();
-  const user = db.users.find((u) => u.id === payload.uid);
+  const user = await repo.users.byId(payload.uid);
   if (!user || user.disabled) return null;
   return {
     id: user.id, username: user.username, name: user.name, role: user.role,
@@ -68,7 +68,7 @@ function verifyToken(token) {
   };
 }
 
-function userFromRequest(req) {
+async function userFromRequest(req) {
   const h = req.headers['authorization'] || '';
   const m = /^Bearer\s+(.+)$/i.exec(h);
   if (m) return verifyToken(m[1].trim());
@@ -99,24 +99,21 @@ function publicUser(u) {
 }
 
 /** 首次启动时创建默认账号 */
-function ensureDefaultUsers() {
-  const db = store.load();
-  if (db.users.length > 0) return false;
-  const now = new Date().toISOString();
-  const mk = (username, name, role, password, unit, unitId) => {
+async function ensureDefaultUsers() {
+  const n = await repo.users.count();
+  if (n > 0) return false;
+  const u0 = (await repo.units.list())[0] || {};
+  const mk = async (username, name, role, password, unit, unitId) => {
     const s = salt();
-    db.users.push({
-      id: store.nextId('user'), username, name, role, unit: unit || '', unitId: unitId || '',
-      salt: s, hash: hashPassword(password, s), createdAt: now, lastLoginAt: null, disabled: false,
+    await repo.users.create({
+      id: await store.nextId('user'), username, name, role,
+      unit: unit || '', unitId: unitId || '',
+      salt: s, hash: hashPassword(password, s),
+      createdAt: new Date().toISOString(), lastLoginAt: null, disabled: false,
     });
   };
-  // 非系统管理员一律绑定单位：系统管理员看全部，其余只看「本单位 + 下级」
-  const u0 = db.units[0] || {};
-  mk('admin', '系统管理员', 'admin', 'admin123');
-  mk('unitadmin', '单位管理员', 'unitadmin', 'unitadmin123', u0.name || '', u0.id || '');
-  mk('editor', '资产录入员', 'editor', 'editor123', u0.name || '', u0.id || '');
-  mk('viewer', '浏览账号', 'viewer', 'viewer123', u0.name || '', u0.id || '');
-  store.saveNow();
+  await mk('admin', '系统管理员', 'admin', 'admin123');
+  await mk('unitadmin', '单位管理员', 'unitadmin', 'unitadmin123', u0.name || '', u0.id || '');
   return true;
 }
 
@@ -125,25 +122,23 @@ function ensureDefaultUsers() {
  * 未绑定单位的非管理员在新模型下会看不到任何数据（安全兜底），
  * 所以启动时自动补齐，避免出现「登录成功但页面全空」的困惑。
  */
-function ensureUnitBound() {
-  const db = store.load();
-  if (!db.units.length) return 0;
-  const unit = db.units.slice().sort((a, b) => (a.sort || 0) - (b.sort || 0))[0];
+async function ensureUnitBound() {
+  const units = await repo.units.list();
+  if (!units.length) return 0;
+  const unit = units.slice().sort((a, b) => (a.sort || 0) - (b.sort || 0))[0];
+  const all = await repo.users.list();
   let n = 0;
-  db.users.forEach((u) => {
-    if (u.role === 'admin') return;
-    if (u.unitId && db.units.some((x) => x.id === u.unitId)) return;
-    if (u.unit && db.units.some((x) => x.name === u.unit)) {
-      const hit = db.units.find((x) => x.name === u.unit);
-      u.unitId = hit.id;
+  for (const u of all) {
+    if (u.unitId && units.some((x) => x.id === u.unitId)) continue;
+    if (u.unit && units.some((x) => x.name === u.unit)) {
+      const hit = units.find((x) => x.name === u.unit);
+      await repo.users.update(u.id, { unit: hit.name, unitId: hit.id });
       n++;
-      return;
+      continue;
     }
-    u.unit = unit.name;
-    u.unitId = unit.id;
+    await repo.users.update(u.id, { unit: unit.name, unitId: unit.id });
     n++;
-  });
-  if (n) store.saveNow();
+  }
   return n;
 }
 
@@ -151,19 +146,19 @@ function ensureUnitBound() {
  * 迁移：为已有系统补一个「单位管理员」示例账号（绑定首个单位）。
  * 已存在同名账号时不做任何修改。
  */
-function ensureUnitAdminDemo() {
-  const db = store.load();
-  if (!db.units.length) return false;
-  if (db.users.some((u) => u.role === 'unitadmin')) return false;
-  const unit = db.units[0];
+async function ensureUnitAdminDemo() {
+  const units = await repo.units.list();
+  if (!units.length) return false;
+  const all = await repo.users.list();
+  if (all.some((u) => u.role === 'unitadmin')) return false;
+  const unit = units[0];
   const s = salt();
-  db.users.push({
-    id: store.nextId('user'), username: 'unitadmin', name: '单位管理员', role: 'unitadmin',
-    unit: unit.name, unitId: unit.id,
+  await repo.users.create({
+    id: await store.nextId('user'), username: 'unitadmin', name: '单位管理员',
+    role: 'unitadmin', unit: unit.name, unitId: unit.id,
     salt: s, hash: hashPassword('unitadmin123', s),
     createdAt: new Date().toISOString(), lastLoginAt: null, disabled: false,
   });
-  store.saveNow();
   return true;
 }
 

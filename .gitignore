@@ -23,3 +23,6 @@ node_modules/
 *.log
 Thumbs.db
 .DS_Store
+*.bak
+*.pre-mysql.js
+lib.pre-mysql/

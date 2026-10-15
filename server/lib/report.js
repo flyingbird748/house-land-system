@@ -270,7 +270,7 @@ function mdToHtml(md) {
  * @param {Array} assets 已过滤的资产列表
  * @param {Object} ctx  { unitNames: [], scopeLabel: '', params: {} }
  */
-function build(assets, ctx) {
+async function build(assets, ctx) {
   const list = Array.isArray(assets) ? assets : [];
   const c = ctx || {};
   const params = c.params || {};
@@ -307,7 +307,7 @@ function build(assets, ctx) {
     '局名再去掉省级与市级前缀后的剩余部分（如「重庆市江北区」→「江北区」）。');
 
   /* ---- 人数与机构 ---- */
-  const cfg = reportcfg.get();
+  const cfg = await reportcfg.get();
   const cfgOf = (k) => (params[k] === undefined || params[k] === null || params[k] === '' ? cfg[k] : params[k]);
 
   const staffN = (cfgOf('actualStaff') === '' || cfgOf('actualStaff') === undefined)
