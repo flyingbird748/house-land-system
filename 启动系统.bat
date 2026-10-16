@@ -1,36 +1,116 @@
 @echo off
-chcp 65001 >nul
+chcp 936 >nul
 cd /d "%~dp0"
-title æˆ¿å±‹åœŸåœ°ä¿¡æ¯ç³»ç»Ÿ
+title ·¿ÎİÍÁµØĞÅÏ¢ÏµÍ³
 
+rem ============================================================
+rem  ±¾½Å±¾×öËÄ¼şÊÂ£º
+rem    1. È·ÈÏ Node ¿ÉÓÃ
+rem    2. È·ÈÏ MySQL ÔÚÔËĞĞ£¨Ã»¿ª¾Í×Ô¶¯À­Æğ£¬µÈËü¾ÍĞ÷²ÅÍùÏÂ×ß£©
+rem    3. È±¹¹½¨²úÎï»òÈ±ÒÀÀµ¾Í×Ô¶¯²¹
+rem    4. Æô¶¯ Web ·şÎñ²¢×Ô¶¯´ò¿ªä¯ÀÀÆ÷
+rem  Ä©Î²´« --no-pause ¿É²»Í£Áô£¨¹©ÆäËü½Å±¾µ÷ÓÃ£©
+rem ============================================================
+
+set "MYSQL_HOME=C:/Users/Rain_Drop/mysql/8.0.28"
+set "MYSQL_INI=C:/Users/Rain_Drop/mysql/my.ini"
+if not "%MYSQL_HOME_ENV%"=="" set "MYSQL_HOME=%MYSQL_HOME_ENV%"
+
+rem ---------------- 1. Node ----------------
 set "NODE_EXE=node"
 where node >nul 2>nul
 if errorlevel 1 (
-  rem ç³»ç»Ÿæœªå®‰è£… Node æ—¶ï¼Œå›é€€åˆ°éšåŒ…é™„å¸¦çš„è¿è¡Œæ—¶ï¼ˆserver\node.exeï¼‰
-  if exist "%~dp0server\node.exe" (
-    set "NODE_EXE=%~dp0server\node.exe"
+  if exist "C:/Users/Rain_Drop/.workbuddy/binaries/node/versions/22.22.2-6/node.exe" (
+    set "NODE_EXE=C:/Users/Rain_Drop/.workbuddy/binaries/node/versions/22.22.2-6/node.exe"
   ) else (
-    echo.
-    echo [é”™è¯¯] æœªæ‰¾åˆ° Node.js è¿è¡Œç¯å¢ƒã€‚
-    echo   è¯·å®‰è£… Node.js 18 æˆ–æ›´é«˜ç‰ˆæœ¬ï¼šhttps://nodejs.org/
-    echo   æˆ–æŠŠ node.exe æ”¾åˆ°æœ¬ç›®å½•çš„ server\ æ–‡ä»¶å¤¹ä¸‹ã€‚
-    echo.
+    echo [´íÎó] Ã»ÕÒµ½ Node.js
+    echo        Çë°²×° Node 18 ¼°ÒÔÉÏ°æ±¾£ºhttps://nodejs.org/
+    echo        »ò¸ÄºÃ±¾½Å±¾ÀïµÄ NODE_EXE Ö¸ÏòÄãµÄ node.exe
     pause
     exit /b 1
   )
 )
 
-if not exist "web\index.html" (
-  echo [æ„å»º] æ­£åœ¨ç”Ÿæˆå‰ç«¯é¡µé¢...
-  "%NODE_EXE%" tools\build.js
+rem ---------------- 2. Êı¾İ¿âÅäÖÃ ----------------
+if not exist "data\dbconfig.json" (
+  echo [ÅäÖÃ] Î´ÕÒµ½ data\dbconfig.json£¬°´Ä¬ÈÏÖµÉú³É...
+  if not exist "data" mkdir "data"
+  (
+    echo {
+    echo   "host": "127.0.0.1",
+    echo   "port": 3306,
+    echo   "user": "root",
+    echo   "password": "",
+    echo   "database": "house_land",
+    echo   "charset": "utf8mb4",
+    echo   "connectionLimit": 10
+    echo }
+  ) > "data\dbconfig.json"
+  echo        ÒÑÉú³É£¬ÇëÈ·ÈÏÀïÃæµÄÕËºÅÃÜÂëÓëÄãµÄ MySQL Ò»ÖÂ¡£
 )
 
+rem ---------------- 3. ÒÀÀµ ----------------
+if not exist "node_modules\mysql2" (
+  echo [ÒÀÀµ] Ê×´ÎÔËĞĞ£¬ÕıÔÚ°²×°Êı¾İ¿âÇı¶¯ mysql2...
+  call npm install --no-audit --no-fund
+  if errorlevel 1 (
+    echo [´íÎó] ÒÀÀµ°²×°Ê§°Ü£¬ÇëÊÖ¶¯Ö´ĞĞ npm install
+    pause
+    exit /b 1
+  )
+)
+
+rem ---------------- 4. MySQL ----------------
+netstat -ano | findstr ":3306" | findstr "LISTENING" >nul
+if not errorlevel 1 goto mysql_ready
+
+echo [Êı¾İ¿â] MySQL Î´ÔËĞĞ£¬ÕıÔÚÆô¶¯...
+if not exist "%MYSQL_HOME%\bin\mysqld.exe" (
+  echo.
+  echo [´íÎó] ÕÒ²»µ½ MySQL£º%MYSQL_HOME%\bin\mysqld.exe
+  echo        ÇëÑ¡ÔñÏÂÃæÁ½ÖÖ·½Ê½Ö®Ò»£º
+  echo          1. ÊÖ¶¯Æô¶¯ÄãµÄ MySQL£¬ÔÙÖØĞÂÔËĞĞ±¾½Å±¾
+  echo          2. ¸Ä±¾½Å±¾¿ªÍ·µÄ MYSQL_HOME / MYSQL_INI Ö¸ÏòÕıÈ·Î»ÖÃ
+  echo.
+  pause
+  exit /b 1
+)
+start "" /MIN "%MYSQL_HOME%\bin\mysqld.exe" --defaults-file=%MYSQL_INI% --console
+
+echo [Êı¾İ¿â] µÈ´ı¾ÍĞ÷£¬×î¶à 60 Ãë...
+set /a TRY=0
+:wait_mysql
+set /a TRY+=1
+if %TRY% gtr 60 (
+  echo [´íÎó] MySQL Æô¶¯³¬Ê±£¬Çë²é¿´ÈÕÖ¾ %MYSQL_HOME%\data\mysqld.err
+  pause
+  exit /b 1
+)
+ping -n 2 127.0.0.1 >nul
+netstat -ano | findstr ":3306" | findstr "LISTENING" >nul
+if errorlevel 1 goto wait_mysql
+echo [Êı¾İ¿â] MySQL ÒÑ¾ÍĞ÷
+
+:mysql_ready
+
+rem ---------------- 5. Ç°¶Ë¹¹½¨ ----------------
+if not exist "web\index.html" (
+  echo [¹¹½¨] ÕıÔÚÉú³ÉÇ°¶ËÒ³Ãæ...
+  "%NODE_EXE%" tools\build.js
+  if errorlevel 1 (
+    echo [´íÎó] Ç°¶Ë¹¹½¨Ê§°Ü
+    pause
+    exit /b 1
+  )
+)
+
+rem ---------------- 6. Æô¶¯·şÎñ ----------------
 echo.
 echo ============================================
-echo   æˆ¿å±‹åœŸåœ°ä¿¡æ¯ç³»ç»Ÿ
-echo   æµè§ˆå™¨å°†è‡ªåŠ¨æ‰“å¼€ http://127.0.0.1:8789
-echo   é»˜è®¤è´¦å·: admin / admin123
-echo   å…³é—­æœ¬çª—å£å³åœæ­¢æœåŠ¡
+echo   ·¿ÎİÍÁµØĞÅÏ¢ÏµÍ³
+echo   ä¯ÀÀÆ÷½«×Ô¶¯´ò¿ª http://127.0.0.1:8789
+echo   ÇëÁôÒâ¿ØÖÆÌ¨Êä³öµÄ³õÊ¼ÕËºÅ
+echo   ¹Ø±Õ±¾´°¿Ú¼´Í£Ö¹·şÎñ
 echo ============================================
 echo.
 
@@ -39,5 +119,5 @@ start "" http://127.0.0.1:8789/
 "%NODE_EXE%" server\server.js
 
 echo.
-echo æœåŠ¡å·²åœæ­¢ã€‚
-pause
+echo ·şÎñÒÑÍ£Ö¹¡£
+if not "%~1"=="--no-pause" pause
